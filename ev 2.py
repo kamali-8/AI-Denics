@@ -1,14 +1,13 @@
-import streamlit as st
 import PyPDF2
 import pyttsx3
-from pydub import AudioSegment
 import os
 import nltk
+from tkinter import Tk, filedialog
 
-# Download NLTK tokenizer
+# Download NLTK tokenizer once
 nltk.download('punkt', quiet=True)
 
-# 🎭 Emotion → Music mapping
+# Simple emotion → music mapping
 emotion_dict = {
     "happy": "happy.mp3",
     "joy": "happy.mp3",
@@ -29,9 +28,16 @@ def detect_emotion(text):
     for word, music in emotion_dict.items():
         if word in text:
             return word, music
-    return "neutral", "calm.mp3"
+    return "neutral", None  # no music if neutral
 
-def pdf_to_emotional_audio(pdf_file):
+def pdf_to_audio():
+    # Choose PDF
+    Tk().withdraw()
+    pdf_file = filedialog.askopenfilename(title="Select PDF", filetypes=[("PDF Files","*.pdf")])
+    if not pdf_file:
+        print("❌ No PDF selected")
+        return
+
     # Extract text
     reader = PyPDF2.PdfReader(pdf_file)
     text_content = ""
@@ -41,62 +47,42 @@ def pdf_to_emotional_audio(pdf_file):
             text_content += txt + "\n"
 
     if text_content.strip() == "":
-        st.warning("⚠️ No text found in PDF")
-        return None
+        print("⚠️ No text found in PDF")
+        return
 
     # Detect emotion
     emotion, music_file = detect_emotion(text_content[:500])
-    st.success(f"🎭 Detected Emotion: {emotion}")
+    print(f"🎭 Detected Emotion: {emotion}")
 
-    # Convert PDF to voice
+    # Convert to speech
     speaker = pyttsx3.init()
-    voice_output = "temp_voice.wav"
-    speaker.save_to_file(text_content, voice_output)
+    voice_file = "temp_voice.wav"
+    speaker.save_to_file(text_content, voice_file)
     speaker.runAndWait()
 
-    # Mix background music
+    # Mix background music if possible
     try:
-        if os.path.exists(music_file):
-            voice = AudioSegment.from_file(voice_output)
-            music = AudioSegment.from_file(music_file) - 15  # lower music volume
+        if music_file and os.path.exists(music_file):
+            from pydub import AudioSegment
+            voice = AudioSegment.from_file(voice_file)
+            music = AudioSegment.from_file(music_file) - 15
 
             if len(music) < len(voice):
                 times = (len(voice) // len(music)) + 1
                 music = music * times
 
             final_audio = music.overlay(voice)
-            output_file = "final_audio.mp3"
+            output_file = os.path.splitext(pdf_file)[0] + "_final.mp3"
             final_audio.export(output_file, format="mp3")
+            print(f"✅ Final emotional audio saved: {output_file}")
         else:
-            st.warning(f"⚠️ Background music not found: {music_file}. Only voice saved.")
-            output_file = "final_audio.wav"
-            os.rename(voice_output, output_file)
+            output_file = os.path.splitext(pdf_file)[0] + "_voice.wav"
+            os.rename(voice_file, output_file)
+            print(f"✅ Voice-only audio saved: {output_file}")
+    except Exception:
+        output_file = os.path.splitext(pdf_file)[0] + "_voice.wav"
+        os.rename(voice_file, output_file)
+        print(f"⚠️ FFmpeg/pydub missing. Voice-only audio saved: {output_file}")
 
-        return output_file
-
-    except Exception as e:
-        st.warning("⚠️ FFmpeg missing or failed, saving voice-only audio instead.")
-        output_file = "final_audio.wav"
-        os.rename(voice_output, output_file)
-        return output_file
-
-# --- Streamlit UI ---
-st.set_page_config(page_title="EchoVerse", layout="centered")
-st.title("🎵 EchoVerse - PDF to Emotional Audio")
-st.write("Upload a PDF, detect emotion, convert to speech, and download with matching background music!")
-
-uploaded_file = st.file_uploader("📂 Upload PDF", type=["pdf"])
-
-if uploaded_file:
-    if st.button("🎶 Generate Audio"):
-        with st.spinner("Processing PDF..."):
-            audio_file = pdf_to_emotional_audio(uploaded_file)
-            if audio_file:
-                st.success("✅ Audio Generated!")
-                st.audio(audio_file, format='audio/mp3')
-                st.download_button(
-                    label="⬇️ Download Audio",
-                    data=open(audio_file, "rb").read(),
-                    file_name=audio_file,
-                    mime="audio/mp3"
-                )
+if __name__ == "__main__":
+    pdf_to_audio()
